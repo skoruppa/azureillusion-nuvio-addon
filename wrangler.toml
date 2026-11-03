@@ -1,0 +1,8 @@
+name = "azureillusion-nuvio-addon"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+# Fonts service (fonts/ deployed to Vercel), e.g. "https://<project>.vercel.app".
+# Empty: /{key}/fonts/ serves plain files. Locally overridden by .env.
+FONTS_BASE_URL = "https://azureillusion-nuvio-fonts.vercel.app"

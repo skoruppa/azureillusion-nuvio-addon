@@ -1,0 +1,9 @@
+{
+  "regions": ["fra1"],
+  "functions": {
+    "api/ass.js": { "maxDuration": 30, "includeFiles": "node_modules/harfbuzzjs/dist/harfbuzz-subset.wasm" }
+  },
+  "rewrites": [
+    { "source": "/ass/:key/:anilist/:file", "destination": "/api/ass?key=:key&anilist=:anilist&file=:file" }
+  ]
+}
