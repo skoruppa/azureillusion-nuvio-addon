@@ -147,7 +147,7 @@ async function searchReleases(ctx, apiKey, anilistId, episode) {
   if (episode !== null) params.set('episode', String(episode));
   return cached(
     ctx,
-    `search/${anilistId}/${episode ?? '-'}`,
+    `search-v2/${anilistId}/${episode ?? '-'}`,
     () => CACHE_SEARCH_SECONDS,
     async () => {
       const data = await apiGet(`/api/public/v1/subtitles/search?${params}`, apiKey);
@@ -157,6 +157,9 @@ async function searchReleases(ctx, apiKey, anilistId, episode) {
         format: release.format,
         group: release.group?.name ?? null,
         groupSlug: release.group?.slug ?? null,
+        filename: release.filename ?? '',
+        sizeBytes: Number(release.sizeBytes) || 0,
+        publishedAt: release.publishedAt ?? null,
       }));
     },
   );
@@ -185,25 +188,56 @@ function progressFor(progress, release) {
   return progress?.byRelease[release.id] ?? (release.groupSlug ? progress?.byGroup[release.groupSlug] : null) ?? null;
 }
 
-// Nuvio shows the subtitle id as its label, so keep it readable and unique.
-function subtitleLabel(release, progress) {
-  const group = (release.group ?? 'AzureIllusion').slice(0, 60);
-  const episodes = progress ? (progress.total ? ` ${progress.translated}/${progress.total}` : ` ${progress.translated} odc.`) : '';
-  return `${group} [${release.format.toUpperCase()}]${episodes}`;
+// Video source the release is synced to, as named in its filename.
+function releaseSource(filename) {
+  // Tokens are separated by spaces, dots, brackets or underscores ("_BD_1080p_", "[WEB 1080p]").
+  const has = (pattern) => new RegExp(`(^|[^a-z0-9])(${pattern})([^a-z0-9]|$)`, 'i').test(filename);
+  if (has('BD|BDRip|Blu-?Ray|BDMV')) return 'BD';
+  if (has('WEB|WEB-?DL|WEB-?Rip|CR|AMZN|NF|SubsPlease|Erai-raws')) return 'WEB';
+  if (has('DVD|DVDRip')) return 'DVD';
+  if (has('HDTV|TV')) return 'TV';
+  return null;
 }
 
-// Complete translations first, otherwise API order; one release per group and format
-// (the API ranks newer versions first), which also keeps labels unique.
-function orderReleases(releases, progress) {
-  const seen = new Set();
-  const unique = releases.filter((release) => {
-    const key = `${release.groupSlug ?? release.group}|${release.format}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+function groupKey(release) {
+  return `${release.groupSlug ?? release.group}|${release.format}`;
+}
+
+// Nuvio shows the subtitle id as its label, so keep it readable and unique.
+function subtitleLabels(releases, progress) {
+  const counts = new Map();
+  releases.forEach((release) => counts.set(groupKey(release), (counts.get(groupKey(release)) ?? 0) + 1));
+  const used = new Set();
+  return releases.map((release) => {
+    const group = (release.group ?? 'AzureIllusion').slice(0, 60);
+    const groupProgress = progressFor(progress, release);
+    const episodes = groupProgress
+      ? (groupProgress.total ? ` ${groupProgress.translated}/${groupProgress.total}` : ` ${groupProgress.translated} odc.`)
+      : '';
+    const source = releaseSource(release.filename ?? '');
+    let label = `${group} [${release.format.toUpperCase()}]${episodes}${source ? ` ${source}` : ''}`;
+    // Several releases of one group for the same episode: tell them apart by publication date.
+    if (counts.get(groupKey(release)) > 1 && release.publishedAt) {
+      const date = new Date(release.publishedAt);
+      label += ` (${String(date.getUTCDate()).padStart(2, '0')}.${String(date.getUTCMonth() + 1).padStart(2, '0')})`;
+    }
+    for (let index = 2; used.has(label); index++) label = label.replace(/( #\d+)?$/, ` #${index}`);
+    used.add(label);
+    return label;
   });
-  const complete = unique.filter((release) => progressFor(progress, release)?.percent >= 100);
-  return [...complete, ...unique.filter((release) => !complete.includes(release))];
+}
+
+// Complete translations first, otherwise API order of groups. Within a group the larger file comes
+// first: the catalogue sometimes files short side-story scripts under the main series' episodes.
+function orderReleases(releases, progress) {
+  const groups = new Map();
+  for (const release of releases) {
+    if (!groups.has(groupKey(release))) groups.set(groupKey(release), []);
+    groups.get(groupKey(release)).push(release);
+  }
+  const ordered = [...groups.values()].flatMap((items) => [...items].sort((a, b) => (b.sizeBytes ?? 0) - (a.sizeBytes ?? 0)));
+  const complete = ordered.filter((release) => progressFor(progress, release)?.percent >= 100);
+  return [...complete, ...ordered.filter((release) => !complete.includes(release))];
 }
 
 async function resolveTarget(ctx, env, apiKey, parsed) {
@@ -246,8 +280,10 @@ async function handleSubtitles(request, ctx, env, apiKey, contentId, withFonts) 
       }),
     ]);
     const origin = new URL(request.url).origin;
-    const subtitles = orderReleases(releases, progress).map((release) => ({
-      id: subtitleLabel(release, progressFor(progress, release)),
+    const ordered = orderReleases(releases, progress);
+    const labels = subtitleLabels(ordered, progress);
+    const subtitles = ordered.map((release, index) => ({
+      id: labels[index],
       url: subtitleFileUrl(origin, env, apiKey, target.anilistId, release, withFonts),
       lang: LANGUAGE_CODES[release.language?.toLowerCase()] ?? release.language ?? 'pol',
     }));
