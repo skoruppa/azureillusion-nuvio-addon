@@ -1,6 +1,7 @@
 import { cached } from './cache.js';
 import { configurePage } from './configure.js';
 import { resolveImdb } from './simkl.js';
+import { getSideStoryTitles, isSideStoryRelease } from './titles.js';
 
 const API_BASE = 'https://subs.azureillusion.ovh';
 const ANIMAP_BASE = 'https://animap.id';
@@ -271,16 +272,18 @@ async function handleSubtitles(request, ctx, env, apiKey, contentId, withFonts) 
     const target = await resolveTarget(ctx, env, apiKey, parsed);
     if (!target?.anilistId) return json({ subtitles: [] }, { maxAge: 3600 });
 
-    const [releases, progress] = await Promise.all([
+    // Progress and titles only improve the list; never fail the whole list because of them.
+    const optional = (promise, what) => promise.catch((error) => {
+      console.warn(`${what} ${target.anilistId} failed: ${error.message}`);
+      return null;
+    });
+    const [releases, progress, titles] = await Promise.all([
       searchReleases(ctx, apiKey, target.anilistId, target.episode),
-      // Progress only improves labels and order; never fail the whole list because of it.
-      getGroupProgress(ctx, apiKey, target.anilistId).catch((error) => {
-        console.warn(`progress ${target.anilistId} failed: ${error.message}`);
-        return null;
-      }),
+      optional(getGroupProgress(ctx, apiKey, target.anilistId), 'progress'),
+      optional(getSideStoryTitles(ctx, target.anilistId), 'titles'),
     ]);
     const origin = new URL(request.url).origin;
-    const ordered = orderReleases(releases, progress);
+    const ordered = orderReleases(releases.filter((release) => !isSideStoryRelease(release, titles)), progress);
     const labels = subtitleLabels(ordered, progress);
     const subtitles = ordered.map((release, index) => ({
       id: labels[index],
