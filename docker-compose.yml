@@ -1,0 +1,12 @@
+services:
+  azureillusion-napisy:
+    build: .
+    container_name: azureillusion-napisy
+    restart: unless-stopped
+    ports:
+      - "7000:7000"
+    environment:
+      # Public HTTPS address of this addon, as Nuvio/Stremio will reach it.
+      PUBLIC_URL: "https://napisy.example.com"
+      # Optional: enables IMDb (tt...) IDs. Create an app in Simkl developer settings.
+      SIMKL_CLIENT_ID: ""

@@ -42,6 +42,62 @@ Scripts that already contain `[Fonts]` are returned unchanged, and any failure f
 The `X-Fonts` response header reports what was embedded. libass (Nuvio) loads these fonts when
 `ass_set_extract_fonts` is enabled.
 
+## Self-hosting
+
+Everything (configuration page, addon and the fonts service) can run as **one Node.js process**,
+without Cloudflare or Vercel. It uses the same code: `selfhost/server.mjs` runs the Worker from `src/`
+and serves `/ass/...` from `fonts/` itself, with an in-memory cache instead of the Workers Cache API.
+
+### Docker (recommended)
+
+```bash
+git clone https://github.com/skoruppa/azureillusion-nuvio-addon.git
+cd azureillusion-nuvio-addon
+# edit PUBLIC_URL (and optionally SIMKL_CLIENT_ID) in docker-compose.yml
+docker compose up -d --build
+```
+
+The addon listens on port 7000. Open `PUBLIC_URL` in a browser, paste an AzureIllusion API key and install.
+
+### Plain Node.js (22+)
+
+```bash
+cd fonts && npm ci --omit=dev && cd ..
+PUBLIC_URL=https://napisy.example.com SIMKL_CLIENT_ID=... npm start
+```
+
+### Configuration
+
+| Variable | Required | Description |
+|---|---|---|
+| `PUBLIC_URL` | recommended | Public address of the addon, e.g. `https://napisy.example.com`. Without it the address is taken from the request and the `X-Forwarded-Proto`/`X-Forwarded-Host` headers. |
+| `SIMKL_CLIENT_ID` | no | Enables IMDb (`tt...`) IDs. Create an app in the developer settings of a Simkl account. Without it only `kitsu:`, `mal:` and `anilist:` IDs work. |
+| `PORT` / `HOST` | no | Listening address, default `0.0.0.0:7000`. |
+| `FONTS_BASE_URL` | no | Use a separate fonts service instead of the built-in one. |
+
+Users bring their own AzureIllusion API keys; the server does not need one.
+
+### Reverse proxy and HTTPS
+
+Put the addon behind a reverse proxy with HTTPS (Caddy, nginx, Traefik). Nuvio and Stremio install
+addons from `https://` addresses; plain `http://` only works on `localhost`. A minimal Caddyfile:
+
+```
+napisy.example.com {
+    reverse_proxy localhost:7000
+}
+```
+
+**API keys are part of every URL** (`/{apiKey}/manifest.json`). Disable or redact request paths in your
+proxy's access logs, or the logs will contain your users' keys. The addon itself never logs paths.
+
+### Resources
+
+Listing subtitles is cheap. Embedding fonts subsets them with HarfBuzz (WASM): roughly 50-150 ms of CPU
+per new subtitle file, then the fonts stay in memory (up to 200 font files) and finished files are
+served with long `Cache-Control` headers. A small VPS should be enough for personal or small-group use.
+The in-memory cache is cleared on restart.
+
 ## Development
 
 ```bash
