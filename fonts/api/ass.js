@@ -30,10 +30,16 @@ async function getPackages(apiKey, anilistId) {
   return packages;
 }
 
+// Prefer the API's own downloadUrl, but only on the API host: the request carries the user's key.
+function fontPath(file) {
+  if (file.downloadUrl?.startsWith(`${API_BASE}/`)) return file.downloadUrl.slice(API_BASE.length);
+  return `/subtitles/file?type=font&id=${encodeURIComponent(file.id)}`;
+}
+
 async function getFont(apiKey, file) {
   const cached = fontCache.get(file.id);
   if (cached) return cached;
-  const bytes = await (await apiFetch(`/subtitles/file?type=package-file&id=${encodeURIComponent(file.id)}`, apiKey)).arrayBuffer();
+  const bytes = await (await apiFetch(fontPath(file), apiKey)).arrayBuffer();
   if (fontCache.size >= FONT_CACHE_LIMIT) fontCache.delete(fontCache.keys().next().value);
   fontCache.set(file.id, bytes);
   return bytes;
