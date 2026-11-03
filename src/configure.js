@@ -192,7 +192,8 @@ export function configurePage(version) {
   <div class="container text-center">
     <small class="text-muted-azure">
       AzureIllusion Napisy · addon do Nuvio v${version}
-      <a href="https://ko-fi.com/skoruppa" target="_blank" class="ms-3" title="Postaw mi kawę"><i class="bi bi-cup-hot-fill fs-5"></i></a>
+      <a href="https://github.com/skoruppa/azureillusion-nuvio-addon" target="_blank" class="ms-3" title="GitHub"><i class="bi bi-github fs-5"></i></a>
+      <a href="https://ko-fi.com/skoruppa" target="_blank" class="ms-2" title="Postaw mi kawę"><i class="bi bi-cup-hot-fill fs-5"></i></a>
     </small>
   </div>
 </footer>
