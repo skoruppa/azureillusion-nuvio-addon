@@ -1,7 +1,7 @@
 import { cached } from './cache.js';
 import { configurePage } from './configure.js';
 import { resolveImdb } from './simkl.js';
-import { getSideStoryTitles, isSideStoryRelease } from './titles.js';
+import { getSideStoryTitles, isSideStoryRelease, normalizeTitle } from './titles.js';
 
 const API_BASE = 'https://subs.azureillusion.ovh';
 const ANIMAP_BASE = 'https://animap.id';
@@ -230,7 +230,23 @@ function subtitleLabels(releases, progress) {
 
 // Complete translations first, otherwise API order of groups. Within a group the larger file comes
 // first: the catalogue sometimes files short side-story scripts under the main series' episodes.
-function orderReleases(releases, progress) {
+// What the played file says about its timing: the raw release group ("[SubsPlease] ...") and the source.
+function videoHints(filename) {
+  if (!filename) return null;
+  const group = /^\s*\[([^\]]+)\]/.exec(filename)?.[1];
+  return { group: group ? normalizeTitle(group) : null, source: releaseSource(filename) };
+}
+
+// Subtitles made for the same raw release (+2) or at least the same source (+1) are likely in sync.
+function matchScore(release, hints) {
+  if (!hints || !release.filename) return 0;
+  let score = 0;
+  if (hints.group && ` ${normalizeTitle(release.filename)} `.includes(` ${hints.group} `)) score += 2;
+  if (hints.source && releaseSource(release.filename) === hints.source) score += 1;
+  return score;
+}
+
+function orderReleases(releases, progress, hints) {
   const groups = new Map();
   for (const release of releases) {
     if (!groups.has(groupKey(release))) groups.set(groupKey(release), []);
@@ -238,7 +254,12 @@ function orderReleases(releases, progress) {
   }
   const ordered = [...groups.values()].flatMap((items) => [...items].sort((a, b) => (b.sizeBytes ?? 0) - (a.sizeBytes ?? 0)));
   const complete = ordered.filter((release) => progressFor(progress, release)?.percent >= 100);
-  return [...complete, ...ordered.filter((release) => !complete.includes(release))];
+  const byProgress = [...complete, ...ordered.filter((release) => !complete.includes(release))];
+  // Releases matching the played file come first, even from groups that are not finished yet.
+  return byProgress
+    .map((release, index) => ({ release, index, score: matchScore(release, hints) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((item) => item.release);
 }
 
 async function resolveTarget(ctx, env, apiKey, parsed) {
@@ -264,7 +285,7 @@ function subtitleFileUrl(origin, env, apiKey, anilistId, release, withFonts) {
   return `${origin}/${key}/sub/${releaseId}.${extension}`;
 }
 
-async function handleSubtitles(request, ctx, env, apiKey, contentId, withFonts) {
+async function handleSubtitles(request, ctx, env, apiKey, contentId, withFonts, videoFilename) {
   const parsed = parseContentId(contentId);
   if (!parsed) return json({ subtitles: [] }, { maxAge: 86400 });
 
@@ -283,7 +304,8 @@ async function handleSubtitles(request, ctx, env, apiKey, contentId, withFonts) 
       optional(getSideStoryTitles(ctx, target.anilistId), 'titles'),
     ]);
     const origin = new URL(request.url).origin;
-    const ordered = orderReleases(releases.filter((release) => !isSideStoryRelease(release, titles)), progress);
+    const relevant = releases.filter((release) => !isSideStoryRelease(release, titles));
+    const ordered = orderReleases(relevant, progress, videoHints(videoFilename));
     const labels = subtitleLabels(ordered, progress);
     const subtitles = ordered.map((release, index) => ({
       id: labels[index],
@@ -367,7 +389,7 @@ export default {
       // Streams from the Docchi addon have burned-in Polish subtitles; their filenames end with .docc.
       const extra = new URLSearchParams(rest.length === 3 ? rest[2].replace(/\.json$/, '') : new URL(request.url).search);
       if (extra.get('filename')?.endsWith('.docc')) return json({ subtitles: [] }, { maxAge: 86400 });
-      return handleSubtitles(request, ctx, env, apiKey, rest[1].replace(/\.json$/, ''), withFonts);
+      return handleSubtitles(request, ctx, env, apiKey, rest[1].replace(/\.json$/, ''), withFonts, extra.get('filename'));
     }
 
     if (resource === 'sub' && rest.length === 1) {
