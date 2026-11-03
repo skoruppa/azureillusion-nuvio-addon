@@ -156,15 +156,54 @@ async function searchReleases(ctx, apiKey, anilistId, episode) {
         language: release.language,
         format: release.format,
         group: release.group?.name ?? null,
+        groupSlug: release.group?.slug ?? null,
       }));
     },
   );
 }
 
-// Nuvio shows the subtitle id as its label, so keep it readable, unique and short.
-function subtitleLabel(release) {
+// Per-group translation progress for the series ("12/12"), keyed by release id and group slug.
+async function getGroupProgress(ctx, apiKey, anilistId) {
+  return cached(ctx, `progress/${anilistId}`, () => CACHE_SEARCH_SECONDS, async () => {
+    const data = await apiGet(`/api/public/v1/anime/${anilistId}/subtitles`, apiKey);
+    const byRelease = {};
+    const byGroup = {};
+    for (const pkg of data.packages ?? []) {
+      const progress = {
+        translated: Number(pkg.translatedEpisodes) || 0,
+        total: Number(pkg.totalEpisodes) || 0,
+        percent: Number(pkg.progressPercent) || 0,
+      };
+      if (pkg.group?.slug && !byGroup[pkg.group.slug]) byGroup[pkg.group.slug] = progress;
+      for (const release of pkg.releases ?? []) byRelease[release.id] = progress;
+    }
+    return { byRelease, byGroup };
+  });
+}
+
+function progressFor(progress, release) {
+  return progress?.byRelease[release.id] ?? (release.groupSlug ? progress?.byGroup[release.groupSlug] : null) ?? null;
+}
+
+// Nuvio shows the subtitle id as its label, so keep it readable and unique.
+function subtitleLabel(release, progress) {
   const group = (release.group ?? 'AzureIllusion').slice(0, 60);
-  return `${group} [${release.format.toUpperCase()}] #${release.id.slice(-6)}`;
+  const episodes = progress ? (progress.total ? ` ${progress.translated}/${progress.total}` : ` ${progress.translated} odc.`) : '';
+  return `${group} [${release.format.toUpperCase()}]${episodes}`;
+}
+
+// Complete translations first, otherwise API order; one release per group and format
+// (the API ranks newer versions first), which also keeps labels unique.
+function orderReleases(releases, progress) {
+  const seen = new Set();
+  const unique = releases.filter((release) => {
+    const key = `${release.groupSlug ?? release.group}|${release.format}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const complete = unique.filter((release) => progressFor(progress, release)?.percent >= 100);
+  return [...complete, ...unique.filter((release) => !complete.includes(release))];
 }
 
 async function resolveTarget(ctx, env, apiKey, parsed) {
@@ -198,10 +237,17 @@ async function handleSubtitles(request, ctx, env, apiKey, contentId, withFonts) 
     const target = await resolveTarget(ctx, env, apiKey, parsed);
     if (!target?.anilistId) return json({ subtitles: [] }, { maxAge: 3600 });
 
-    const releases = await searchReleases(ctx, apiKey, target.anilistId, target.episode);
+    const [releases, progress] = await Promise.all([
+      searchReleases(ctx, apiKey, target.anilistId, target.episode),
+      // Progress only improves labels and order; never fail the whole list because of it.
+      getGroupProgress(ctx, apiKey, target.anilistId).catch((error) => {
+        console.warn(`progress ${target.anilistId} failed: ${error.message}`);
+        return null;
+      }),
+    ]);
     const origin = new URL(request.url).origin;
-    const subtitles = releases.map((release) => ({
-      id: subtitleLabel(release),
+    const subtitles = orderReleases(releases, progress).map((release) => ({
+      id: subtitleLabel(release, progressFor(progress, release)),
       url: subtitleFileUrl(origin, env, apiKey, target.anilistId, release, withFonts),
       lang: LANGUAGE_CODES[release.language?.toLowerCase()] ?? release.language ?? 'pol',
     }));
