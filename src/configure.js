@@ -69,6 +69,10 @@ export function configurePage(version) {
   .option input:checked::after { content: ''; width: 10px; height: 6px; border: 2px solid var(--cyan); border-top: 0; border-right: 0; transform: translateY(-1px) rotate(-45deg); }
   .option .title { font-family: 'Lexend', sans-serif; font-weight: 600; display: block; }
   .option .subtitle { display: block; font-size: .82rem; color: var(--muted); margin-top: 2px; }
+  .notice { display: none; gap: 10px; align-items: flex-start; margin: -12px 0 20px; padding: 12px 14px; border-radius: 10px;
+    border: 1px solid rgba(250, 204, 21, 0.45); background: rgba(250, 204, 21, 0.08); color: #fde68a; font-size: .86rem; }
+  .notice.show { display: flex; }
+  .notice i { font-size: 1.05rem; margin-top: 1px; }
   .split { position: relative; display: flex; }
   .split > .btn-main { border-top-right-radius: 0; border-bottom-right-radius: 0; }
   .split-toggle { flex: 0 0 auto; width: 56px; display: grid; place-items: center; color: #fff; border: 1px solid rgba(96, 165, 250, 0.45);
@@ -108,7 +112,7 @@ export function configurePage(version) {
       </div>
       <h1 class="mt-3 mb-2">AzureIllusion Napisy</h1>
       <p class="text-muted-azure mb-0">
-        Polskie napisy z <a href="https://subs.azureillusion.ovh" target="_blank">AzureIllusion</a>
+        Polskie napisy dla anime z <a href="https://subs.azureillusion.ovh" target="_blank">AzureIllusion</a>
         prosto w <a href="https://nuvio.tv" target="_blank">Nuvio</a> i <a href="https://www.stremio.com/" target="_blank">Stremio</a>
       </p>
     </header>
@@ -139,6 +143,10 @@ export function configurePage(version) {
                 <span class="subtitle">Dołącza do napisów czcionki grupy (tylko użyte znaki), żeby wyglądały jak u tłumaczy. Gdy się nie uda, dostaniesz zwykły plik.</span>
               </span>
             </label>
+            <div class="notice" id="reinstallNotice" role="status">
+              <i class="bi bi-exclamation-triangle"></i>
+              <span>Zmiana tej opcji zmienia adres dodatku. Usuń dotychczasową wersję i zainstaluj dodatek ponownie z nowego adresu.</span>
+            </div>
             <label for="manifestUrl" class="label">URL manifestu</label>
             <div class="input-group mb-3">
               <input id="manifestUrl" class="form-control" type="text" readonly>
@@ -215,7 +223,13 @@ export function configurePage(version) {
     history.replaceState({}, '', base + '/configure');
   }
 
-  fontsCheckbox.addEventListener('change', () => { if (verifiedKey) showInstall(verifiedKey); });
+  // Set when the page was opened from an installed addon (/{key}/configure or /{key}/fonts/configure).
+  let installedWithFonts = null;
+  fontsCheckbox.addEventListener('change', () => {
+    if (verifiedKey) showInstall(verifiedKey);
+    const changed = installedWithFonts !== null && fontsCheckbox.checked !== installedWithFonts;
+    document.getElementById('reinstallNotice').classList.toggle('show', changed);
+  });
   keyInput.addEventListener('input', () => {
     verifiedKey = null;
     document.getElementById('installSection').style.display = 'none';
@@ -264,6 +278,7 @@ export function configurePage(version) {
   if (segments.at(-1) === 'configure' && (segments.length === 2 || (segments.length === 3 && segments[1] === 'fonts'))) {
     keyInput.value = decodeURIComponent(segments[0]);
     fontsCheckbox.checked = segments.length === 3;
+    installedWithFonts = fontsCheckbox.checked;
     showInstall(keyInput.value);
   }
 </script>
