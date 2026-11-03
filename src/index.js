@@ -1,6 +1,6 @@
 import { cached } from './cache.js';
 import { configurePage } from './configure.js';
-import { resolveImdb } from './simkl.js';
+import { resolveAniListViaSimkl, resolveImdb } from './simkl.js';
 import { getSideStoryTitles, isSideStoryRelease, normalizeTitle } from './titles.js';
 
 const API_BASE = 'https://subs.azureillusion.ovh';
@@ -124,20 +124,27 @@ async function resolveViaApi(apiKey, prefix, id) {
   return page.total === 1 && exact.length === 1 ? exact[0].anilistId ?? null : null;
 }
 
-async function resolveAniListId(ctx, apiKey, prefix, id) {
+// animap first (no limits), then Simkl, and the AzureIllusion API last: it spends the user's rate limit.
+async function resolveAniListId(ctx, env, apiKey, prefix, id) {
   if (prefix === 'anilist') return id;
   const result = await cached(
     ctx,
     `resolve/${prefix}/${id}`,
     (value) => (value.anilistId ? CACHE_RESOLVE_SECONDS : CACHE_RESOLVE_MISS_SECONDS),
     async () => {
-      let anilistId = null;
-      try {
-        anilistId = await resolveViaAnimap(prefix, id);
-      } catch (error) {
-        console.warn(`animap ${prefix}:${id} failed: ${error.message}`);
+      const sources = [
+        ['animap', () => resolveViaAnimap(prefix, id)],
+        ['simkl', () => (env.SIMKL_CLIENT_ID ? resolveAniListViaSimkl(ctx, env.SIMKL_CLIENT_ID, prefix, id) : null)],
+      ];
+      for (const [name, resolve] of sources) {
+        try {
+          const anilistId = await resolve();
+          if (anilistId) return { anilistId: String(anilistId) };
+        } catch (error) {
+          console.warn(`${name} ${prefix}:${id} failed: ${error.message}`);
+        }
       }
-      return { anilistId: anilistId ?? (await resolveViaApi(apiKey, prefix, id)) };
+      return { anilistId: await resolveViaApi(apiKey, prefix, id) };
     },
   );
   return result.anilistId;
@@ -264,12 +271,12 @@ function orderReleases(releases, progress, hints) {
 
 async function resolveTarget(ctx, env, apiKey, parsed) {
   if (parsed.prefix !== 'imdb') {
-    return { anilistId: await resolveAniListId(ctx, apiKey, parsed.prefix, parsed.id), episode: parsed.episode };
+    return { anilistId: await resolveAniListId(ctx, env, apiKey, parsed.prefix, parsed.id), episode: parsed.episode };
   }
   if (!env.SIMKL_CLIENT_ID) return null;
   const mapped = await resolveImdb(ctx, env.SIMKL_CLIENT_ID, parsed.id, parsed.season, parsed.episode);
   if (!mapped) return null;
-  const anilistId = mapped.anilistId ?? (mapped.malId ? await resolveAniListId(ctx, apiKey, 'mal', mapped.malId) : null);
+  const anilistId = mapped.anilistId ?? (mapped.malId ? await resolveAniListId(ctx, env, apiKey, 'mal', mapped.malId) : null);
   return { anilistId, episode: mapped.episode };
 }
 

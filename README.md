@@ -13,7 +13,7 @@ Runs as a Cloudflare Worker. Every user provides their own AzureIllusion API key
 - `tt<imdb>[:<season>:<episode>]` - only when `SIMKL_CLIENT_ID` is set
 
 Kitsu and MAL IDs are converted to AniList IDs with [animap.id](https://animap.id) (no rate limits),
-falling back to the AzureIllusion API. IMDb IDs are mapped with Simkl: `/redirect` finds the anime,
+falling back to Simkl (when `SIMKL_CLIENT_ID` is set) and finally to the AzureIllusion API. IMDb IDs are mapped with Simkl: `/redirect` finds the anime,
 `mapped_tvdb_seasons` and `relations` pick the entry for the season, and the episode list converts
 TVDB season/episode numbers to the entry's local episode (e.g. One Piece S22E15 → episode 1100).
 
@@ -50,12 +50,16 @@ and serves `/ass/...` from `fonts/` itself, with an in-memory cache instead of t
 
 ### Docker (recommended)
 
+Images for `linux/amd64` and `linux/arm64` are published to
+`ghcr.io/skoruppa/azureillusion-nuvio-addon` for every release tag (`latest`, `X.Y.Z`, `X.Y`).
+
 ```bash
-git clone https://github.com/skoruppa/azureillusion-nuvio-addon.git
-cd azureillusion-nuvio-addon
+curl -O https://raw.githubusercontent.com/skoruppa/azureillusion-nuvio-addon/main/docker-compose.yml
 # edit PUBLIC_URL (and optionally SIMKL_CLIENT_ID) in docker-compose.yml
-docker compose up -d --build
+docker compose up -d
 ```
+
+To build the image yourself, clone the repository and use `build: .` in `docker-compose.yml`.
 
 The addon listens on port 7000. Open `PUBLIC_URL` in a browser, paste an AzureIllusion API key and install.
 

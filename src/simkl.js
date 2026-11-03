@@ -100,3 +100,15 @@ export async function resolveImdb(ctx, clientId, imdbId, season, episode) {
     },
   );
 }
+
+/** Fallback for kitsu/mal IDs when animap has no mapping: { kitsu|mal: id } -> AniList ID or null. */
+export async function resolveAniListViaSimkl(ctx, clientId, service, id) {
+  const target = await cached(
+    ctx,
+    `simkl/redirect/${service}/${id}`,
+    (value) => (value ? CACHE_HIT_SECONDS : CACHE_MISS_SECONDS),
+    () => redirectToSimkl(clientId, { [service]: id }),
+  );
+  if (target?.type !== 'anime') return null;
+  return (await getAnime(ctx, clientId, target.id)).anilistId;
+}

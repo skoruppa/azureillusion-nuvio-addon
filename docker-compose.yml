@@ -1,6 +1,8 @@
 services:
   azureillusion-napisy:
-    build: .
+    image: ghcr.io/skoruppa/azureillusion-nuvio-addon:latest
+    # Or build from this repository instead of pulling the image:
+    # build: .
     container_name: azureillusion-napisy
     restart: unless-stopped
     ports:
