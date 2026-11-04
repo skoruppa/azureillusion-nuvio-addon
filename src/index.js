@@ -6,7 +6,7 @@ import { getSideStoryTitles, isSideStoryRelease, normalizeTitle } from './titles
 const API_BASE = 'https://subs.azureillusion.ovh';
 const ANIMAP_BASE = 'https://animap.id';
 const LOGO_URL = `${API_BASE}/branding/azureillusion-logo-v3.png`;
-const ADDON_VERSION = '0.1.0';
+const ADDON_VERSION = '0.2.0';
 const USER_AGENT = `Nuvio-Addon-AzureIllusion/${ADDON_VERSION}`;
 const ID_PREFIXES = ['kitsu:', 'mal:', 'anilist:'];
 const IMDB_PREFIX = 'tt';
