@@ -67,6 +67,11 @@ metric-compatible Liberation Sans/Serif/Mono, Comic Sans MS with Comic Neue and 
 own font always wins. The script is rewritten to name the substitute; on a sample of 16 files this added about
 25-65 KB per affected file.
 
+Families still missing are looked up in [Google Fonts](https://fonts.google.com) (all open-licensed): the name is
+split into family, weight and style ("Signika SemiBold" -> Signika 600) and the css2 API serves a static TTF of that
+instance. A group's "PL" tag is dropped ("Gentium Basic PL" -> Gentium Basic, the original already has Polish glyphs)
+and the script is renamed accordingly. Each family adds roughly 10-20 KB after subsetting.
+
 Scripts that already contain `[Fonts]` are returned unchanged, and any failure falls back to the original file. The
 `X-Fonts` response header reports what was embedded, substituted and missing. Nuvio's libass loads these fonts
 (`ass_set_extract_fonts`); fonts nobody provides (e.g. commercial Japanese fonts) still fall back to the device font.

@@ -2,6 +2,7 @@ import { collectFontUsage, hasFontsSection, insertFontsSection, renameFontFamili
 import { readFontInfo } from './sfnt.js';
 import { subsetFont } from './subset.js';
 import { loadSubstituteFonts, substitutesFor } from './substitutes.js';
+import { loadGoogleFamily, parseFamily } from './googlefonts.js';
 
 function variantScore(font, bold, italic) {
   return Math.abs(font.weight - (bold ? 700 : 400)) + (font.italic === italic ? 0 : 1000);
@@ -43,11 +44,40 @@ function matchFonts(usage, candidates) {
   return { chosen, missing };
 }
 
+// Family names are matched in lowercase; Google Fonts needs the spelling the script uses.
+function originalSpelling(text, family) {
+  const escaped = family.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<=[,\\\\]fn|,)\\s*@?(${escaped})(?=\\s*[,\\\\})])`, 'i').exec(text)?.[1] ?? family;
+}
+
+// Downloads still-missing families from Google Fonts. Returns the fonts to add and the renames
+// needed when the downloaded font is named differently (e.g. "Lato Black PL" -> "Lato Black").
+async function fromGoogleFonts(text, missing, usage) {
+  const results = await Promise.all(missing.map(async (family) => {
+    try {
+      const found = await loadGoogleFamily(originalSpelling(text, family), [...usage.get(family).variants]);
+      return found && { family, ...found, candidates: readCandidates(found.fonts) };
+    } catch {
+      return null;
+    }
+  }));
+  const fonts = [];
+  const renames = new Map();
+  for (const result of results.filter(Boolean)) {
+    fonts.push(...result.candidates);
+    const names = new Set(result.candidates.flatMap((font) => [...font.names]));
+    if (names.has(result.family)) continue;
+    const target = [result.name, parseFamily(result.name).family].find((name) => names.has(name.toLowerCase()));
+    if (target) renames.set(result.family, target);
+  }
+  return { fonts, renames, found: results.filter(Boolean).map((result) => result.family) };
+}
+
 /**
  * Embeds the subsetted fonts an ASS script uses, picked from `fonts` ([{ fileName, bytes }]).
  * Families missing from `fonts` that have an open-licensed substitute (Arial -> Liberation Sans,
- * ...) are renamed in the script and the substitute is embedded instead.
- * Returns { text, embedded, missing, substituted }.
+ * ...) are renamed in the script and the substitute is embedded instead; families still missing
+ * are looked up in Google Fonts. Returns { text, embedded, missing, substituted, google }.
  */
 export async function embedFonts(text, fonts) {
   if (hasFontsSection(text)) return { text, embedded: [], missing: [], substituted: [], skipped: 'already-embedded' };
@@ -62,6 +92,18 @@ export async function embedFonts(text, fonts) {
     ({ chosen, missing } = matchFonts(collectFontUsage(text), candidates));
   }
   const substituted = [...substitutes].map(([family, substitute]) => `${family}->${substitute}`);
+
+  let google = [];
+  if (missing.length > 0) {
+    const usage = collectFontUsage(text);
+    const result = await fromGoogleFonts(text, missing, usage);
+    if (result.fonts.length > 0) {
+      text = renameFontFamilies(text, result.renames);
+      candidates = candidates.concat(result.fonts);
+      ({ chosen, missing } = matchFonts(collectFontUsage(text), candidates));
+      google = result.found;
+    }
+  }
 
   const embedded = [];
   let index = 0;
@@ -80,5 +122,5 @@ export async function embedFonts(text, fonts) {
     });
   }
 
-  return { text: embedded.length ? insertFontsSection(text, embedded) : text, embedded, missing, substituted };
+  return { text: embedded.length ? insertFontsSection(text, embedded) : text, embedded, missing, substituted, google };
 }

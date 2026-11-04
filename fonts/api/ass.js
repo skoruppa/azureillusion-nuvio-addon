@@ -75,7 +75,7 @@ async function withFonts(apiKey, anilistId, releaseId, original) {
   if (result.embedded.length === 0) return { body: original, info: result.skipped ?? `none-matched;missing=${result.missing.length}` };
   const encoded = new TextEncoder().encode(result.text);
   const body = hasBom ? new Uint8Array([0xef, 0xbb, 0xbf, ...encoded]) : encoded;
-  return { body, info: `embedded=${result.embedded.length};substituted=${result.substituted.length};missing=${result.missing.length}` };
+  return { body, info: `embedded=${result.embedded.length};substituted=${result.substituted.length};google=${result.google.length};missing=${result.missing.length}` };
 }
 
 export async function GET(request) {
