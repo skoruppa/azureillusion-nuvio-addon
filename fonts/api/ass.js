@@ -3,7 +3,7 @@ import { embedFonts, prefetchGoogleFonts } from '../lib/embed.js';
 // GET /ass/{apiKey}/{anilistId}/{releaseId}.ass (rewritten to /api/ass?...)
 // Returns the subtitle with the fonts it uses embedded; falls back to the original file on any font problem.
 const API_BASE = 'https://subs.azureillusion.ovh/api/public/v1';
-const USER_AGENT = 'Nuvio-Addon-AzureIllusion-Fonts/0.2.0';
+const USER_AGENT = 'Nuvio-Addon-AzureIllusion-Fonts/0.3.0';
 const MAX_FONT_BYTES = 40 * 1024 * 1024;
 const PACKAGES_TTL_MS = 30 * 60 * 1000;
 const FONT_CACHE_LIMIT = 200;
