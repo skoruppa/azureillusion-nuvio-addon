@@ -1,4 +1,4 @@
-import { embedFonts } from '../lib/embed.js';
+import { embedFonts, prefetchGoogleFonts } from '../lib/embed.js';
 
 // GET /ass/{apiKey}/{anilistId}/{releaseId}.ass (rewritten to /api/ass?...)
 // Returns the subtitle with the fonts it uses embedded; falls back to the original file on any font problem.
@@ -56,10 +56,8 @@ function subtitleResponse(body, cacheControl, extraHeaders = {}) {
   });
 }
 
-async function withFonts(apiKey, anilistId, releaseId, original) {
-  const hasBom = original[0] === 0xef && original[1] === 0xbb && original[2] === 0xbf;
-  const text = new TextDecoder('utf-8', { fatal: true }).decode(original);
-
+// The group's fonts for this release. Does not need the subtitle, so it runs alongside its download.
+async function loadGroupFonts(apiKey, anilistId, releaseId) {
   const packages = await getPackages(apiKey, anilistId);
   const owner = packages.find((pkg) => (pkg.releases ?? []).some((release) => release.id === releaseId));
   // Even without group fonts, open-licensed substitutes (e.g. for Arial) may apply.
@@ -67,9 +65,12 @@ async function withFonts(apiKey, anilistId, releaseId, original) {
 
   let total = 0;
   const allowed = fontFiles.filter((file) => (total += Number(file.sizeBytes) || 0) <= MAX_FONT_BYTES);
-  const fonts = await Promise.all(
-    allowed.map(async (file) => ({ fileName: file.filename, bytes: await getFont(apiKey, file) })),
-  );
+  return Promise.all(allowed.map(async (file) => ({ fileName: file.filename, bytes: await getFont(apiKey, file) })));
+}
+
+async function withFonts(original, fonts) {
+  const hasBom = original[0] === 0xef && original[1] === 0xbb && original[2] === 0xbf;
+  const text = new TextDecoder('utf-8', { fatal: true }).decode(original);
 
   const result = await embedFonts(text, fonts);
   if (result.embedded.length === 0) return { body: original, info: result.skipped ?? `none-matched;missing=${result.missing.length}` };
@@ -85,6 +86,9 @@ export async function GET(request) {
   const releaseId = /^(.+)\.ass$/i.exec(params.get('file') ?? '')?.[1];
   if (!apiKey || !/^\d+$/.test(anilistId) || !releaseId) return new Response('Bad Request', { status: 400 });
 
+  const started = Date.now();
+  // Settled promise: a font failure must not hide the subtitle download error, or the reverse.
+  const groupFonts = loadGroupFonts(apiKey, anilistId, releaseId).then((fonts) => ({ fonts }), (error) => ({ error }));
   let original;
   try {
     const response = await apiFetch(`/subtitles/file?type=subtitle&id=${encodeURIComponent(releaseId)}`, apiKey);
@@ -94,8 +98,11 @@ export async function GET(request) {
   }
 
   try {
-    const started = Date.now();
-    const { body, info } = await withFonts(apiKey, anilistId, releaseId, original);
+    // Look up Google Fonts while the group's fonts are still downloading.
+    prefetchGoogleFonts(new TextDecoder().decode(original));
+    const loaded = await groupFonts;
+    if (loaded.error) throw loaded.error;
+    const { body, info } = await withFonts(original, loaded.fonts);
     return subtitleResponse(body, CACHE_LONG, { 'X-Fonts': `${info};ms=${Date.now() - started}` });
   } catch (error) {
     console.warn(`fonts ${releaseId} failed: ${error.message}`);

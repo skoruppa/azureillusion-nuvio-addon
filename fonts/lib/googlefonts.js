@@ -5,6 +5,7 @@ const CSS_URL = 'https://fonts.googleapis.com/css2';
 const USER_AGENT = 'Mozilla/4.0'; // makes css2 answer with TrueType URLs
 const MAX_FONT_BYTES = 15 * 1024 * 1024;
 const MISS_TTL_MS = 6 * 60 * 60 * 1000;
+const MAX_CACHED_INSTANCES = 100;
 
 const WEIGHTS = new Map([
   ['thin', 100], ['hairline', 100], ['extralight', 200], ['ultralight', 200], ['light', 300],
@@ -14,7 +15,7 @@ const WEIGHTS = new Map([
 const WEIGHT_NAMES = new Map([[100, 'Thin'], [200, 'ExtraLight'], [300, 'Light'], [400, 'Regular'],
   [500, 'Medium'], [600, 'SemiBold'], [700, 'Bold'], [800, 'ExtraBold'], [900, 'Black']]);
 
-const fontCache = new Map(); // css2 query -> ArrayBuffer | { missUntil }
+const fontCache = new Map(); // css2 query -> { promise, missUntil? }
 
 /**
  * Splits a family named in a script into a Google Fonts family and style:
@@ -46,25 +47,29 @@ export function googleFamilyName({ family, weight }) {
   return weight && weight !== 400 ? `${family} ${WEIGHT_NAMES.get(weight)}` : family;
 }
 
-async function fetchInstance(family, weight, italic) {
-  const query = `${encodeURIComponent(family)}:ital,wght@${italic ? 1 : 0},${weight}`;
-  const cached = fontCache.get(query);
-  if (cached instanceof ArrayBuffer) return cached;
-  if (cached && cached.missUntil > Date.now()) return null;
-
+async function downloadInstance(query) {
   const css = await fetch(`${CSS_URL}?family=${query}`, { headers: { 'User-Agent': USER_AGENT } });
   const url = css.ok ? /url\((https:\/\/fonts\.gstatic\.com\/[^)]+\.ttf)\)/.exec(await css.text())?.[1] : null;
-  if (!url) {
-    fontCache.set(query, { missUntil: Date.now() + MISS_TTL_MS });
-    return null;
-  }
+  if (!url) return null;
   const response = await fetch(url);
   const length = Number(response.headers.get('content-length') ?? 0);
   if (!response.ok || length > MAX_FONT_BYTES) return null;
   const bytes = await response.arrayBuffer();
-  if (bytes.byteLength > MAX_FONT_BYTES) return null;
-  fontCache.set(query, bytes);
-  return bytes;
+  return bytes.byteLength > MAX_FONT_BYTES ? null : bytes;
+}
+
+// Caches the promise, so parallel requests for one instance share a single download.
+function fetchInstance(family, weight, italic) {
+  const query = `${encodeURIComponent(family)}:ital,wght@${italic ? 1 : 0},${weight}`;
+  const cached = fontCache.get(query);
+  if (cached && !(cached.missUntil <= Date.now())) return cached.promise;
+  const promise = downloadInstance(query).catch(() => null).then((bytes) => {
+    if (!bytes) fontCache.set(query, { promise, missUntil: Date.now() + MISS_TTL_MS });
+    return bytes;
+  });
+  if (fontCache.size >= MAX_CACHED_INSTANCES) fontCache.delete(fontCache.keys().next().value);
+  fontCache.set(query, { promise });
+  return promise;
 }
 
 /**
@@ -74,17 +79,16 @@ async function fetchInstance(family, weight, italic) {
 export async function loadGoogleFamily(scriptFamily, variants) {
   const parsed = parseFamily(scriptFamily);
   if (!parsed.family) return null;
-  const fonts = [];
-  for (const variant of variants) {
+  const downloads = await Promise.all(variants.map(async (variant) => {
     const [bold, italic] = variant.split('|').map((value) => value === '1');
     const weight = parsed.weight ?? (bold ? 700 : 400);
     const wantsItalic = parsed.italic || italic;
     const bytes = await fetchInstance(parsed.family, weight, wantsItalic)
       ?? (wantsItalic ? await fetchInstance(parsed.family, weight, false) : null)
       ?? (weight !== 400 ? await fetchInstance(parsed.family, 400, false) : null);
-    if (bytes && !fonts.some((font) => font.bytes === bytes)) {
-      fonts.push({ fileName: `${parsed.family.replace(/\s+/g, '')}-${weight}${wantsItalic ? 'i' : ''}.ttf`, bytes });
-    }
-  }
+    return bytes && { fileName: `${parsed.family.replace(/\s+/g, '')}-${weight}${wantsItalic ? 'i' : ''}.ttf`, bytes };
+  }));
+  // Variants that fell back to the same instance share one file.
+  const fonts = downloads.filter((font, index) => font && downloads.findIndex((other) => other?.bytes === font.bytes) === index);
   return fonts.length ? { name: googleFamilyName(parsed), fonts } : null;
 }

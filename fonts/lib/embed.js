@@ -74,6 +74,20 @@ async function fromGoogleFonts(text, missing, usage) {
 }
 
 /**
+ * Starts Google Fonts downloads for every family the script uses, without waiting for the group's
+ * fonts that decide which ones are really missing. Results land in the download cache that
+ * embedFonts reads, so a later lookup is instant; unused downloads only cost transfer.
+ */
+export function prefetchGoogleFonts(text) {
+  const usage = collectFontUsage(text);
+  const covered = substitutesFor([...usage.keys()]);
+  for (const [family, { variants }] of usage) {
+    if (covered.has(family)) continue;
+    loadGoogleFamily(originalSpelling(text, family), [...variants]).catch(() => {});
+  }
+}
+
+/**
  * Embeds the subsetted fonts an ASS script uses, picked from `fonts` ([{ fileName, bytes }]).
  * Families missing from `fonts` that have an open-licensed substitute (Arial -> Liberation Sans,
  * ...) are renamed in the script and the substitute is embedded instead; families still missing
