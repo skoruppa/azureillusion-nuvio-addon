@@ -112,6 +112,50 @@ export function collectFontUsage(text) {
   return usage;
 }
 
+/**
+ * Renames font families in style definitions and \fn tags, e.g. to point at substitute fonts.
+ * `mapping` is Map<lowercase family, new family>; everything else is kept byte for byte.
+ */
+export function renameFontFamilies(text, mapping) {
+  if (mapping.size === 0) return text;
+  const rename = (name) => {
+    const vertical = name.trim().startsWith('@') ? '@' : '';
+    const target = mapping.get(normalizeFamily(name));
+    return target ? vertical + target : null;
+  };
+  let section = '';
+  let fontnameIndex = -1;
+  return text.split(/(\r?\n)/).map((line) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      section = trimmed.toLowerCase();
+      return line;
+    }
+    const colon = line.indexOf(':');
+    if (colon < 0) return line;
+    const key = line.slice(0, colon).trim().toLowerCase();
+    if (section === '[v4+ styles]' || section === '[v4 styles]') {
+      if (key === 'format') {
+        fontnameIndex = line.slice(colon + 1).split(',').map((field) => field.trim().toLowerCase()).indexOf('fontname');
+      } else if (key === 'style' && fontnameIndex >= 0) {
+        // Style fields never contain commas, so a plain split keeps the line intact.
+        const fields = line.slice(colon + 1).split(',');
+        const renamed = fields[fontnameIndex] !== undefined && rename(fields[fontnameIndex]);
+        if (renamed) {
+          fields[fontnameIndex] = fields[fontnameIndex].replace(/\S.*\S|\S/, renamed);
+          return line.slice(0, colon + 1) + fields.join(',');
+        }
+      }
+    } else if (section === '[events]' && (key === 'dialogue' || key === 'comment')) {
+      return line.replace(/\\fn([^\\})]*)/g, (tag, name) => {
+        const renamed = name.trim() && rename(name);
+        return renamed ? `\\fn${renamed}` : tag;
+      });
+    }
+    return line;
+  }).join('');
+}
+
 export function hasFontsSection(text) {
   return /^\[Fonts\]\s*$/im.test(text);
 }

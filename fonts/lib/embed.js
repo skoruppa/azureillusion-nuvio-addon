@@ -1,6 +1,7 @@
-import { collectFontUsage, hasFontsSection, insertFontsSection } from './ass.js';
+import { collectFontUsage, hasFontsSection, insertFontsSection, renameFontFamilies } from './ass.js';
 import { readFontInfo } from './sfnt.js';
 import { subsetFont } from './subset.js';
+import { loadSubstituteFonts, substitutesFor } from './substitutes.js';
 
 function variantScore(font, bold, italic) {
   return Math.abs(font.weight - (bold ? 700 : 400)) + (font.italic === italic ? 0 : 1000);
@@ -10,22 +11,18 @@ function safeFileName(family, index, extension) {
   return `${family.replace(/[^\p{L}\p{N} _-]/gu, '').trim() || 'font'}_${index}${extension}`;
 }
 
-/**
- * Embeds the subsetted fonts an ASS script uses, picked from `fonts`
- * ([{ fileName, bytes }]). Returns { text, embedded, missing }.
- */
-export async function embedFonts(text, fonts) {
-  if (hasFontsSection(text)) return { text, embedded: [], missing: [], skipped: 'already-embedded' };
-
-  const usage = collectFontUsage(text);
-  const candidates = fonts.flatMap((font) => {
+function readCandidates(fonts) {
+  return fonts.flatMap((font) => {
     try {
       return [{ ...font, ...readFontInfo(font.bytes) }];
     } catch {
       return [];
     }
   });
+}
 
+// Picks the font files covering each used family and variant: { chosen, missing }.
+function matchFonts(usage, candidates) {
   const chosen = new Map(); // candidate -> Set<codepoint>
   const missing = [];
   for (const [family, { chars, variants }] of usage) {
@@ -43,6 +40,28 @@ export async function embedFonts(text, fonts) {
       chosen.set(best, set);
     }
   }
+  return { chosen, missing };
+}
+
+/**
+ * Embeds the subsetted fonts an ASS script uses, picked from `fonts` ([{ fileName, bytes }]).
+ * Families missing from `fonts` that have an open-licensed substitute (Arial -> Liberation Sans,
+ * ...) are renamed in the script and the substitute is embedded instead.
+ * Returns { text, embedded, missing, substituted }.
+ */
+export async function embedFonts(text, fonts) {
+  if (hasFontsSection(text)) return { text, embedded: [], missing: [], substituted: [], skipped: 'already-embedded' };
+
+  let candidates = readCandidates(fonts);
+  let { chosen, missing } = matchFonts(collectFontUsage(text), candidates);
+
+  const substitutes = substitutesFor(missing);
+  if (substitutes.size > 0) {
+    text = renameFontFamilies(text, substitutes);
+    candidates = candidates.concat(readCandidates(await loadSubstituteFonts([...substitutes.values()])));
+    ({ chosen, missing } = matchFonts(collectFontUsage(text), candidates));
+  }
+  const substituted = [...substitutes].map(([family, substitute]) => `${family}->${substitute}`);
 
   const embedded = [];
   let index = 0;
@@ -61,5 +80,5 @@ export async function embedFonts(text, fonts) {
     });
   }
 
-  return { text: embedded.length ? insertFontsSection(text, embedded) : text, embedded, missing };
+  return { text: embedded.length ? insertFontsSection(text, embedded) : text, embedded, missing, substituted };
 }

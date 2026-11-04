@@ -11,6 +11,7 @@ COPY package.json ./
 COPY src src
 COPY fonts/api fonts/api
 COPY fonts/lib fonts/lib
+COPY fonts/substitutes fonts/substitutes
 COPY selfhost selfhost
 
 ENV NODE_ENV=production PORT=7000

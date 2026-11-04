@@ -1,9 +1,17 @@
 {
-  "regions": ["fra1"],
+  "regions": [
+    "fra1"
+  ],
   "functions": {
-    "api/ass.js": { "maxDuration": 30, "includeFiles": "node_modules/harfbuzzjs/dist/harfbuzz-subset.wasm" }
+    "api/ass.js": {
+      "maxDuration": 30,
+      "includeFiles": "{node_modules/harfbuzzjs/dist/harfbuzz-subset.wasm,substitutes/**}"
+    }
   },
   "rewrites": [
-    { "source": "/ass/:key/:anilist/:file", "destination": "/api/ass?key=:key&anilist=:anilist&file=:file" }
+    {
+      "source": "/ass/:key/:anilist/:file",
+      "destination": "/api/ass?key=:key&anilist=:anilist&file=:file"
+    }
   ]
 }

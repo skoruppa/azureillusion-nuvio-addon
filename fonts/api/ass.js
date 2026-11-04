@@ -62,8 +62,8 @@ async function withFonts(apiKey, anilistId, releaseId, original) {
 
   const packages = await getPackages(apiKey, anilistId);
   const owner = packages.find((pkg) => (pkg.releases ?? []).some((release) => release.id === releaseId));
+  // Even without group fonts, open-licensed substitutes (e.g. for Arial) may apply.
   const fontFiles = (owner?.files ?? []).filter((file) => file.type === 'FONT');
-  if (fontFiles.length === 0) return { body: original, info: 'no-fonts' };
 
   let total = 0;
   const allowed = fontFiles.filter((file) => (total += Number(file.sizeBytes) || 0) <= MAX_FONT_BYTES);
@@ -75,7 +75,7 @@ async function withFonts(apiKey, anilistId, releaseId, original) {
   if (result.embedded.length === 0) return { body: original, info: result.skipped ?? `none-matched;missing=${result.missing.length}` };
   const encoded = new TextEncoder().encode(result.text);
   const body = hasBom ? new Uint8Array([0xef, 0xbb, 0xbf, ...encoded]) : encoded;
-  return { body, info: `embedded=${result.embedded.length};missing=${result.missing.length}` };
+  return { body, info: `embedded=${result.embedded.length};substituted=${result.substituted.length};missing=${result.missing.length}` };
 }
 
 export async function GET(request) {
