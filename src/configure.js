@@ -127,7 +127,7 @@ export function configurePage(version) {
               <button class="btn btn-icon" type="button" id="toggleKey" title="Pokaż / ukryj"><i class="bi bi-eye"></i></button>
             </div>
             <div class="small text-muted-azure mt-2">
-              Klucz utworzysz po zalogowaniu na stronie AzureIllusion. Najlepiej użyj osobnego klucza tylko do tego dodatku.
+              Klucz utworzysz po zalogowaniu w <a href="https://subs.azureillusion.ovh/account?tab=api" target="_blank">ustawieniach API na stronie AzureIllusion</a>. Najlepiej użyj osobnego klucza tylko do tego dodatku.
             </div>
             <button class="btn-main mt-4" type="submit" id="checkButton">
               <i class="bi bi-shield-check"></i>
@@ -180,7 +180,7 @@ export function configurePage(version) {
 
         <div class="mt-4 text-center text-muted-azure">
           <small><i class="bi bi-info-circle me-1"></i>
-            Klucz jest częścią adresu manifestu. Nie udostępniaj go innym - w razie wycieku unieważnij klucz na stronie AzureIllusion.
+            Klucz jest częścią adresu manifestu. Nie udostępniaj go innym - w razie wycieku unieważnij klucz w <a href="https://subs.azureillusion.ovh/account?tab=api" target="_blank">ustawieniach API AzureIllusion</a>.
           </small>
         </div>
       </div>

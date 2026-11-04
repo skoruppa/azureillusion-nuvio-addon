@@ -5,8 +5,8 @@ Subtitles addon for **Nuvio** (also installable in Stremio) serving Polish anime
 
 ## Installation
 
-1. Create an API key after logging in to [AzureIllusion](https://subs.azureillusion.ovh). A separate key just for this
-   addon is recommended.
+1. Create an API key in the [AzureIllusion API settings](https://subs.azureillusion.ovh/account?tab=api) (log in with Discord first). A separate key just
+   for this addon is recommended.
 2. Open **https://azureillusion-nuvio-addon.skoruppa.workers.dev**, paste the key and click *Sprawdź klucz*.
 3. Optionally enable *Próbuj dodawać czcionki do plików ASS* (see [Embedded fonts](#embedded-fonts)).
 4. Click *Zainstaluj w Nuvio* (or *Zainstaluj w Stremio* from the arrow menu), or copy the manifest URL and paste it in
