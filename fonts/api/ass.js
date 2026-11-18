@@ -1,8 +1,10 @@
 import { embedFonts, prefetchGoogleFonts } from '../lib/embed.js';
+import { findLibraryFonts } from '../lib/library.js';
 
 // GET /ass/{apiKey}/{anilistId}/{releaseId}.ass (rewritten to /api/ass?...)
 // Returns the subtitle with the fonts it uses embedded; falls back to the original file on any font problem.
 const API_BASE = 'https://subs.azureillusion.ovh/api/public/v1';
+const API_PATH = new URL(API_BASE).pathname;
 const USER_AGENT = 'Nuvio-Addon-AzureIllusion-Fonts/0.3.0';
 const MAX_FONT_BYTES = 40 * 1024 * 1024;
 const PACKAGES_TTL_MS = 30 * 60 * 1000;
@@ -31,9 +33,21 @@ async function getPackages(apiKey, anilistId) {
 }
 
 // Prefer the API's own downloadUrl, but only on the API host: the request carries the user's key.
+function apiPath(url) {
+  if (url?.startsWith(`${API_BASE}/`)) return url.slice(API_BASE.length);
+  if (url?.startsWith(`${API_PATH}/`)) return url.slice(API_PATH.length);
+  return null;
+}
+
 function fontPath(file) {
-  if (file.downloadUrl?.startsWith(`${API_BASE}/`)) return file.downloadUrl.slice(API_BASE.length);
-  return `/subtitles/file?type=font&id=${encodeURIComponent(file.id)}`;
+  return apiPath(file.downloadUrl) ?? `/subtitles/file?type=font&id=${encodeURIComponent(file.id)}`;
+}
+
+function fontLibrary(apiKey) {
+  return {
+    search: async (query) => (await (await apiFetch(`/fonts?q=${encodeURIComponent(query)}`, apiKey)).json())?.data,
+    download: async (item) => (await apiFetch(apiPath(item.downloadUrl) ?? `/fonts/${encodeURIComponent(item.id)}/download`, apiKey)).arrayBuffer(),
+  };
 }
 
 async function getFont(apiKey, file) {
@@ -68,15 +82,16 @@ async function loadGroupFonts(apiKey, anilistId, releaseId) {
   return Promise.all(allowed.map(async (file) => ({ fileName: file.filename, bytes: await getFont(apiKey, file) })));
 }
 
-async function withFonts(original, fonts) {
+async function withFonts(original, fonts, apiKey) {
   const hasBom = original[0] === 0xef && original[1] === 0xbb && original[2] === 0xbf;
   const text = new TextDecoder('utf-8', { fatal: true }).decode(original);
 
-  const result = await embedFonts(text, fonts);
+  const library = fontLibrary(apiKey);
+  const result = await embedFonts(text, fonts, { findFonts: (families) => findLibraryFonts(library, families) });
   if (result.embedded.length === 0) return { body: original, info: result.skipped ?? `none-matched;missing=${result.missing.length}` };
   const encoded = new TextEncoder().encode(result.text);
   const body = hasBom ? new Uint8Array([0xef, 0xbb, 0xbf, ...encoded]) : encoded;
-  return { body, info: `embedded=${result.embedded.length};substituted=${result.substituted.length};google=${result.google.length};missing=${result.missing.length}` };
+  return { body, info: `embedded=${result.embedded.length};substituted=${result.substituted.length};google=${result.google.length};library=${result.library.length};missing=${result.missing.length}` };
 }
 
 export async function GET(request) {
@@ -102,7 +117,7 @@ export async function GET(request) {
     prefetchGoogleFonts(new TextDecoder().decode(original));
     const loaded = await groupFonts;
     if (loaded.error) throw loaded.error;
-    const { body, info } = await withFonts(original, loaded.fonts);
+    const { body, info } = await withFonts(original, loaded.fonts, apiKey);
     return subtitleResponse(body, CACHE_LONG, { 'X-Fonts': `${info};ms=${Date.now() - started}` });
   } catch (error) {
     console.warn(`fonts ${releaseId} failed: ${error.message}`);

@@ -91,10 +91,11 @@ export function prefetchGoogleFonts(text) {
  * Embeds the subsetted fonts an ASS script uses, picked from `fonts` ([{ fileName, bytes }]).
  * Families missing from `fonts` that have an open-licensed substitute (Arial -> Liberation Sans,
  * ...) are renamed in the script and the substitute is embedded instead; families still missing
- * are looked up in Google Fonts. Returns { text, embedded, missing, substituted, google }.
+ * are looked up in Google Fonts and finally with `findFonts` (other groups' uploads in the
+ * AzureIllusion font library). Returns { text, embedded, missing, substituted, google, library }.
  */
-export async function embedFonts(text, fonts) {
-  if (hasFontsSection(text)) return { text, embedded: [], missing: [], substituted: [], skipped: 'already-embedded' };
+export async function embedFonts(text, fonts, { findFonts } = {}) {
+  if (hasFontsSection(text)) return { text, embedded: [], missing: [], substituted: [], library: [], skipped: 'already-embedded' };
 
   let candidates = readCandidates(fonts);
   let { chosen, missing } = matchFonts(collectFontUsage(text), candidates);
@@ -119,6 +120,19 @@ export async function embedFonts(text, fonts) {
     }
   }
 
+  let library = [];
+  if (missing.length > 0 && findFonts) {
+    const usage = collectFontUsage(text);
+    const requests = missing.map((family) => ({ family, variants: [...usage.get(family).variants] }));
+    const found = readCandidates(await findFonts(requests).catch(() => []));
+    if (found.length > 0) {
+      const before = missing;
+      candidates = candidates.concat(found);
+      ({ chosen, missing } = matchFonts(usage, candidates));
+      library = before.filter((family) => !missing.includes(family));
+    }
+  }
+
   const embedded = [];
   let index = 0;
   for (const [font, chars] of chosen) {
@@ -136,5 +150,5 @@ export async function embedFonts(text, fonts) {
     });
   }
 
-  return { text: embedded.length ? insertFontsSection(text, embedded) : text, embedded, missing, substituted, google };
+  return { text: embedded.length ? insertFontsSection(text, embedded) : text, embedded, missing, substituted, google, library };
 }

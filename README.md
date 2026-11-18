@@ -72,9 +72,18 @@ split into family, weight and style ("Signika SemiBold" -> Signika 600) and the 
 instance. A group's "PL" tag is dropped ("Gentium Basic PL" -> Gentium Basic, the original already has Polish glyphs)
 and the script is renamed accordingly. Each family adds roughly 10-20 KB after subsetting.
 
+The last step is the AzureIllusion font library (`/fonts`), which holds the fonts all groups uploaded, so a family one
+group forgot is often there from another group (e.g. `Kozuka Gothic Mikakunin B PL`). The library is searched by file
+name: a family is found when someone uploaded it under its own name (`Cabin B PL.ttf`, `Signika-SemiBold.ttf`). Every
+bold/italic variant the script uses needs a matching file (a bold-only upload is never used for regular text), and the
+downloaded font must carry the family name. Library lookups count against the user's limit of 60 requests per minute,
+so the library comes after the free sources, at most 5 families and 8 files are fetched per subtitle, and searches
+(6 h) and files are cached.
+
 Scripts that already contain `[Fonts]` are returned unchanged, and any failure falls back to the original file. The
-`X-Fonts` response header reports what was embedded, substituted and missing. Nuvio's libass loads these fonts
-(`ass_set_extract_fonts`); fonts nobody provides (e.g. commercial Japanese fonts) still fall back to the device font.
+`X-Fonts` response header reports how many families were embedded, substituted, taken from Google Fonts or the library,
+and missing. Nuvio's libass loads these fonts (`ass_set_extract_fonts`); fonts nobody uploaded under their own name
+still fall back to the device font.
 
 ## Self-hosting
 
