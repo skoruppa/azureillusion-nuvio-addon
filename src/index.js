@@ -211,13 +211,17 @@ function groupKey(release) {
   return `${release.groupSlug ?? release.group}|${release.format}`;
 }
 
+function groupName(release) {
+  return (release.group ?? 'AzureIllusion').slice(0, 60);
+}
+
 // Nuvio shows the subtitle id as its label, so keep it readable and unique.
 function subtitleLabels(releases, progress) {
   const counts = new Map();
   releases.forEach((release) => counts.set(groupKey(release), (counts.get(groupKey(release)) ?? 0) + 1));
   const used = new Set();
   return releases.map((release) => {
-    const group = (release.group ?? 'AzureIllusion').slice(0, 60);
+    const group = groupName(release);
     const groupProgress = progressFor(progress, release);
     const episodes = groupProgress
       ? (groupProgress.total ? ` ${groupProgress.translated}/${groupProgress.total}` : ` ${groupProgress.translated} odc.`)
@@ -318,6 +322,7 @@ async function handleSubtitles(request, ctx, env, apiKey, contentId, withFonts, 
       id: labels[index],
       url: subtitleFileUrl(origin, env, apiKey, target.anilistId, release, withFonts),
       lang: LANGUAGE_CODES[release.language?.toLowerCase()] ?? release.language ?? 'pol',
+      label: groupName(release),
     }));
     return json({ subtitles }, { maxAge: CACHE_SEARCH_SECONDS });
   } catch (error) {
