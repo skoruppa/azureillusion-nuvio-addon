@@ -31,8 +31,8 @@ export async function subsetFont(buffer, codepoints) {
   const input = hb.hb_subset_input_create_or_fail();
   const unicodes = hb.hb_subset_input_unicode_set(input);
   for (const codepoint of codepoints) hb.hb_set_add(unicodes, codepoint);
-  // Keep every name in every language: libass matches typographic families, variable-font
-  // instance names and families declared only in non-English records. Names are tiny.
+  // Keep every name in every language: libass matches family and full names declared only in
+  // non-English records. Names are tiny.
   for (const set of [HB_SUBSET_SETS_NAME_ID, HB_SUBSET_SETS_NAME_LANG_ID]) {
     const names = hb.hb_subset_input_set(input, set);
     hb.hb_set_clear(names);

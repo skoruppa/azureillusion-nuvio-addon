@@ -1,6 +1,11 @@
-// Minimal TrueType/OpenType reader: just enough to match fonts the way libass does
-// (family, typographic family and full names) and to pick bold/italic variants.
-const FAMILY_NAME_IDS = new Set([1, 4, 16]);
+// Minimal TrueType/OpenType reader: just enough to match fonts the way libass does for embedded
+// fonts (Windows family names, plus full names or, for CFF fonts, PostScript names) and to pick
+// bold/italic variants.
+const FAMILY = 1;
+const FULL_NAME = 4;
+const POSTSCRIPT_NAME = 6;
+const TYPOGRAPHIC_FAMILY = 16;
+const WINDOWS = 3;
 
 function readTables(view) {
   let base = 0;
@@ -29,8 +34,9 @@ function decodeName(bytes, platformId) {
 }
 
 function readNameTable(view, bytes, name) {
-  const byId = new Map(); // nameId -> Set<lowercase string>
-  if (!name) return byId;
+  const windows = new Map(); // nameId -> Set<lowercase string>
+  const other = new Map();
+  if (!name) return { windows, other };
   const count = view.getUint16(name.offset + 2);
   const stringsStart = name.offset + view.getUint16(name.offset + 4);
   for (let i = 0; i < count; i++) {
@@ -41,39 +47,29 @@ function readNameTable(view, bytes, name) {
     const start = stringsStart + view.getUint16(record + 10);
     const value = decodeName(bytes.subarray(start, start + length), platformId).trim().toLowerCase();
     if (!value) continue;
+    const byId = platformId === WINDOWS ? windows : other;
     if (!byId.has(nameId)) byId.set(nameId, new Set());
     byId.get(nameId).add(value);
   }
-  return byId;
+  return { windows, other };
 }
 
-// Named instances of a variable font ("Alegreya Medium") are addressed in ASS by family + instance name.
-function readInstanceNames(view, fvar, namesById) {
-  if (!fvar) return [];
-  const axesOffset = view.getUint16(fvar.offset + 4);
-  const axisCount = view.getUint16(fvar.offset + 8);
-  const axisSize = view.getUint16(fvar.offset + 10);
-  const instanceCount = view.getUint16(fvar.offset + 12);
-  const instanceSize = view.getUint16(fvar.offset + 14);
-  const families = [...(namesById.get(16) ?? []), ...(namesById.get(1) ?? [])];
-  const result = [];
-  for (let i = 0; i < instanceCount; i++) {
-    const instance = fvar.offset + axesOffset + axisCount * axisSize + i * instanceSize;
-    for (const subfamily of namesById.get(view.getUint16(instance)) ?? []) {
-      for (const family of families) result.push(`${family} ${subfamily}`);
-    }
+function libassNames({ windows, other }, isPostScript) {
+  const names = new Set(windows.get(FAMILY));
+  if (names.size === 0) {
+    const fallback = windows.get(TYPOGRAPHIC_FAMILY) ?? other.get(TYPOGRAPHIC_FAMILY) ?? other.get(FAMILY);
+    if (fallback) names.add([...fallback][0]);
   }
-  return result;
+  const fullNames = isPostScript ? [...(windows.get(POSTSCRIPT_NAME) ?? other.get(POSTSCRIPT_NAME) ?? [])].slice(0, 1) : windows.get(FULL_NAME);
+  fullNames?.forEach((value) => names.add(value));
+  return names;
 }
 
 export function readFontInfo(buffer) {
   const bytes = new Uint8Array(buffer);
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const tables = readTables(view);
-  const namesById = readNameTable(view, bytes, tables.get('name'));
-  const names = new Set();
-  for (const nameId of FAMILY_NAME_IDS) namesById.get(nameId)?.forEach((value) => names.add(value));
-  readInstanceNames(view, tables.get('fvar'), namesById).forEach((value) => names.add(value));
+  const names = libassNames(readNameTable(view, bytes, tables.get('name')), tables.has('CFF ') || tables.has('CFF2'));
 
   let weight = 400;
   let italic = false;

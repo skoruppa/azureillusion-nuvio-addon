@@ -57,7 +57,8 @@ With *Próbuj dodawać czcionki do plików ASS*, ASS files are served by the fon
 
 1. downloads the subtitle and the group's font files (`/anime/{anilistId}/subtitles`, `files[type=FONT]`),
 2. collects families, bold/italic variants and characters from styles and `\fn`/`\b`/`\i`/`\r` tags,
-3. matches them to font name tables (including variable-font named instances),
+3. matches them to font name tables the way libass does for embedded fonts (Windows family names, plus full names or,
+   for CFF fonts, PostScript names),
 4. subsets each font with HarfBuzz (`harfbuzzjs`) and
 5. uuencodes them into a `[Fonts]` section before `[Events]`.
 
