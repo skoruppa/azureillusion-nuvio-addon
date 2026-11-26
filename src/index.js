@@ -1,5 +1,6 @@
 import { cached } from './cache.js';
 import { configurePage } from './configure.js';
+import { handleFontStore } from './fontstore.js';
 import { resolveAniListViaSimkl, resolveImdb } from './simkl.js';
 import { getSideStoryTitles, isSideStoryRelease, normalizeTitle } from './titles.js';
 
@@ -379,6 +380,7 @@ export default {
     }
 
     if (request.method === 'POST' && segments.join('/') === 'api/check') return handleKeyCheck(request);
+    if (request.method === 'POST' && segments.join('/') === 'api/font-store') return handleFontStore(request, env);
     if (request.method !== 'GET') return new Response('Method Not Allowed', { status: 405 });
 
     if (segments.length === 0 || (segments.length === 1 && segments[0] === 'configure')) {

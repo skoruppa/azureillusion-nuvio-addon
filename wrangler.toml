@@ -6,3 +6,11 @@ compatibility_date = "2026-10-01"
 # Fonts service (fonts/ deployed to Vercel), e.g. "https://<project>.vercel.app".
 # Empty: /{key}/fonts/ serves plain files. Locally overridden by .env.
 FONTS_BASE_URL = "https://azureillusion-nuvio-fonts.vercel.app"
+
+# Font metadata and font library lookups shared by the fonts service (POST /api/font-store,
+# authorised with the FONT_STORE_TOKEN secret).
+[[d1_databases]]
+binding = "FONTS_DB"
+database_name = "azureillusion-nuvio-fonts"
+database_id = "d9c5844a-3b31-481e-b54b-9dc62a89b72e"
+migrations_dir = "migrations"

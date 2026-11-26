@@ -55,7 +55,8 @@ With *Próbuj dodawać czcionki do plików ASS*, ASS files are served by the fon
 (a Vercel function, because subsetting takes ~50-150 ms of CPU, more than a free Worker allows). Like
 [assfonts](https://github.com/wyzdwdz/assfonts), it:
 
-1. downloads the subtitle and the group's font files (`/anime/{anilistId}/subtitles`, `files[type=FONT]`),
+1. downloads the subtitle and the group's font files it needs (`/anime/{anilistId}/subtitles`, `files[type=FONT]`, see
+   [Font index](#font-index)),
 2. collects families, bold/italic variants and characters from styles and `\fn`/`\b`/`\i`/`\r` tags,
 3. matches them to font name tables the way libass does for embedded fonts (Windows family names, plus full names or,
    for CFF fonts, PostScript names),
@@ -80,12 +81,26 @@ face with its weight and italic flag, and each bold/italic variant the script us
 picks one. Only when a family has more than 30 files and the first page has no close face is that variant requested
 separately (`weight=`, `italic=`). The downloaded font must carry the family name. Library lookups count against the
 user's limit of 60 requests per minute, so the library comes after the free sources, at most 5 families and 8 files are
-fetched per subtitle, and searches (6 h) and files are cached.
+fetched per subtitle, and searches are kept in the font index.
 
 Scripts that already contain `[Fonts]` are returned unchanged, and any failure falls back to the original file. The
 `X-Fonts` response header reports how many families were embedded, substituted, taken from Google Fonts or the library,
-and missing. Nuvio's libass loads these fonts (`ass_set_extract_fonts`); fonts nobody uploaded still fall back to the
-device font.
+and missing, plus how many of the group's files were used (`group=used/all`). Nuvio's libass loads these fonts
+(`ass_set_extract_fonts`); fonts nobody uploaded still fall back to the device font.
+
+### Font index
+
+A group's package can hold dozens of fonts (77 in one DemoSubs package) while a script uses a few, and every download
+counts against the user's 60 requests per minute. The fonts service therefore keeps an index of every font file it has
+seen (the names libass matches, weight and italic, by file id; files never change) and of font library searches (7 days,
+1 day when nothing was found). With the index, only the group files whose names the script uses are downloaded. Files
+not in the index yet are downloaded at most 25 per subtitle, those whose file names look like the families the script
+uses first, and added to it. When files were left out and a family is still missing, the response is cached for 5
+minutes only (`X-Fonts` ends with `partial`), so the next request completes it.
+
+The index is shared by all users, as the font data does not depend on the API key. The hosted version keeps it in
+Cloudflare D1, behind `POST /api/font-store` on the Worker; self-hosted instances keep it in `DATA_DIR`, or in memory
+without it. Font files themselves stay in the instance's memory.
 
 ## Self-hosting
 
@@ -121,6 +136,7 @@ PUBLIC_URL=https://napisy.example.com SIMKL_CLIENT_ID=... npm start
 | `PUBLIC_URL` | recommended | Public address of the addon, e.g. `https://napisy.example.com`. Without it the address is taken from the request and the `X-Forwarded-Proto`/`X-Forwarded-Host` headers. |
 | `SIMKL_CLIENT_ID` | no | Enables IMDb (`tt...`) IDs and the Simkl fallback for Kitsu/MAL. Create an app in the developer settings of a Simkl account. |
 | `PORT` / `HOST` | no | Listening address, default `0.0.0.0:7000`. |
+| `DATA_DIR` | recommended | Directory for the [font index](#font-index) (`font-store.json`), kept across restarts. The Docker image uses `/data`, a volume in `docker-compose.yml`. Without it the index lives in memory. |
 | `FONTS_BASE_URL` | no | Use a separate fonts service instead of the built-in one. |
 
 Users bring their own AzureIllusion API keys; the server does not need one.
@@ -143,7 +159,8 @@ contain your users' keys. The addon itself never logs paths.
 
 Listing subtitles is cheap. Embedding fonts costs roughly 50-150 ms of CPU per new subtitle file; fonts stay in memory
 (up to 200 font files) and finished files are served with long `Cache-Control` headers. A small VPS should be enough
-for personal or small-group use. The in-memory cache is cleared on restart.
+for personal or small-group use. The in-memory cache is cleared on restart; the font index in `DATA_DIR` is not (a few
+MB at most).
 
 ## Development
 
@@ -163,5 +180,10 @@ npm start                                  # or both in one process: http://loca
    `vercel.json` alone was not applied.
 2. **Worker on Cloudflare:** set `FONTS_BASE_URL` in `wrangler.toml` `[vars]` to the Vercel URL, then
    `npx wrangler secret put SIMKL_CLIENT_ID` and `npm run deploy`.
-3. **Docker image:** push a `vX.Y.Z` tag; `.github/workflows/docker-publish.yml` builds and publishes it and creates a
+3. **Font index (D1):** `npx wrangler d1 create azureillusion-nuvio-fonts` (put its `database_id` in `wrangler.toml`),
+   `npx wrangler d1 migrations apply azureillusion-nuvio-fonts --remote`, generate a random token and set it as the
+   Worker secret `FONT_STORE_TOKEN`. In the Vercel project, set `FONT_STORE_URL`
+   (`https://<worker>/api/font-store`) and the same `FONT_STORE_TOKEN`, then redeploy. Without them the fonts service
+   keeps the index in memory.
+4. **Docker image:** push a `vX.Y.Z` tag; `.github/workflows/docker-publish.yml` builds and publishes it and creates a
    GitHub release.

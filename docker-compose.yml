@@ -12,3 +12,9 @@ services:
       PUBLIC_URL: "https://napisy.example.com"
       # Optional: enables IMDb (tt...) IDs. Create an app in Simkl developer settings.
       SIMKL_CLIENT_ID: ""
+    volumes:
+      # Font metadata and font library lookups, kept across restarts.
+      - napisy-data:/data
+
+volumes:
+  napisy-data:

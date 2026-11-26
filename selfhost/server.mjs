@@ -2,12 +2,15 @@
 // behind one Node.js HTTP server. Configuration comes from environment variables, see README.
 import { createServer } from 'node:http';
 import { Readable } from 'node:stream';
+import { fileStore } from './file-store.mjs';
 import { MemoryCache } from './memory-cache.mjs';
 
 globalThis.caches ??= { default: new MemoryCache() };
 
 const { default: worker } = await import('../src/index.js');
 const { GET: fontsHandler } = await import('../fonts/api/ass.js');
+const { setFontStore } = await import('../fonts/lib/store.js');
+if (process.env.DATA_DIR) setFontStore(await fileStore(process.env.DATA_DIR));
 
 const PORT = Number(process.env.PORT ?? 7000);
 const HOST = process.env.HOST ?? '0.0.0.0';

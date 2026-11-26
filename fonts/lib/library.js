@@ -1,6 +1,9 @@
 import { readFontInfo } from './sfnt.js';
+import { fontStore } from './store.js';
 
 const SEARCH_TTL_MS = 6 * 60 * 60 * 1000;
+const STORED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const STORED_EMPTY_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_CACHED_SEARCHES = 300;
 const MAX_CACHED_FONTS = 100;
 const MAX_FONT_BYTES = 10 * 1024 * 1024;
@@ -17,14 +20,47 @@ function remember(cache, key, value, limit) {
   cache.set(key, value);
 }
 
+function trimItem(item) {
+  const face = item.faces?.[0];
+  return {
+    id: item.id,
+    sha256: item.sha256,
+    fileName: item.fileName ?? item.name,
+    sizeBytes: item.sizeBytes,
+    downloadUrl: item.downloadUrl,
+    families: item.families,
+    faces: face ? [{ family: face.family, families: face.families, fullName: face.fullName, weight: face.weight, italic: face.italic }] : [],
+  };
+}
+
+function queryFor(filters) {
+  return new URLSearchParams(filters).toString();
+}
+
+async function storedOrFetched(api, query) {
+  const stored = (await fontStore().get({ searches: [query] }).catch(() => null))?.searches.get(query);
+  if (stored) return stored;
+  const data = await api.search(query);
+  const result = { items: (data?.items ?? []).map(trimItem), total: Number(data?.total) || 0 };
+  await fontStore().put({ searches: [{ query, data: result, ttl: result.items.length ? STORED_TTL_MS : STORED_EMPTY_TTL_MS }] }).catch(() => {});
+  return result;
+}
+
 function search(api, filters) {
-  const query = new URLSearchParams(filters).toString();
+  const query = queryFor(filters);
   const cached = searchCache.get(query);
   if (cached && cached.expires > Date.now()) return cached.promise;
-  const promise = api.search(query).then((data) => ({ items: data?.items ?? [], total: Number(data?.total) || 0 }));
+  const promise = storedOrFetched(api, query);
   promise.catch(() => searchCache.delete(query));
   remember(searchCache, query, { promise, expires: Date.now() + SEARCH_TTL_MS }, MAX_CACHED_SEARCHES);
   return promise;
+}
+
+async function preloadSearches(queries) {
+  const missing = queries.filter((query) => !(searchCache.get(query)?.expires > Date.now()));
+  if (missing.length === 0) return;
+  const stored = (await fontStore().get({ searches: missing }).catch(() => null))?.searches;
+  stored?.forEach((data, query) => remember(searchCache, query, { promise: Promise.resolve(data), expires: Date.now() + SEARCH_TTL_MS }, MAX_CACHED_SEARCHES));
 }
 
 function facesFor(family, items) {
@@ -120,6 +156,7 @@ async function lookupFamily(api, family, variants, budget) {
 
 export async function findLibraryFonts(api, families) {
   const budget = { downloads: MAX_DOWNLOADS };
+  await preloadSearches(families.slice(0, MAX_FAMILIES).map(({ family }) => queryFor({ family })));
   const results = await Promise.all(families.slice(0, MAX_FAMILIES).map(({ family, variants }) =>
     lookupFamily(api, family, variants, budget).catch(() => [])));
   return results.flat();

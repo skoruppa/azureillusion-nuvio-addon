@@ -14,7 +14,9 @@ COPY fonts/lib fonts/lib
 COPY fonts/substitutes fonts/substitutes
 COPY selfhost selfhost
 
-ENV NODE_ENV=production PORT=7000
+RUN mkdir -p /data && chown node:node /data
+ENV NODE_ENV=production PORT=7000 DATA_DIR=/data
+VOLUME /data
 EXPOSE 7000
 USER node
 CMD ["node", "selfhost/server.mjs"]
