@@ -6,66 +6,77 @@ const MAX_CACHED_FONTS = 100;
 const MAX_FONT_BYTES = 10 * 1024 * 1024;
 const MAX_FAMILIES = 5;
 const MAX_DOWNLOADS = 8;
-
-const REGULAR = '0|0';
-const STYLES = new Map([
-  ['', REGULAR], ['regular', REGULAR], ['normal', REGULAR], ['book', REGULAR], ['roman', REGULAR], ['r', REGULAR],
-  ['bold', '1|0'], ['bd', '1|0'], ['b', '1|0'],
-  ['italic', '0|1'], ['oblique', '0|1'], ['it', '0|1'], ['i', '0|1'],
-  ['bolditalic', '1|1'], ['boldoblique', '1|1'], ['italicbold', '1|1'], ['bi', '1|1'], ['z', '1|1'],
-]);
+const MAX_ATTEMPTS = 2;
+const CLOSE_MATCH = 100;
 
 const searchCache = new Map();
 const fontCache = new Map();
-
-function normalize(name) {
-  return name.toLowerCase().replace(/\.(ttf|otf|ttc)$/, '').replace(/[^\p{L}\p{N}]/gu, '');
-}
 
 function remember(cache, key, value, limit) {
   if (cache.size >= limit) cache.delete(cache.keys().next().value);
   cache.set(key, value);
 }
 
-function search(api, query) {
-  const key = query.toLowerCase();
-  const cached = searchCache.get(key);
+function search(api, filters) {
+  const query = new URLSearchParams(filters).toString();
+  const cached = searchCache.get(query);
   if (cached && cached.expires > Date.now()) return cached.promise;
   const promise = api.search(query).then((data) => ({ items: data?.items ?? [], total: Number(data?.total) || 0 }));
-  promise.catch(() => searchCache.delete(key));
-  remember(searchCache, key, { promise, expires: Date.now() + SEARCH_TTL_MS }, MAX_CACHED_SEARCHES);
+  promise.catch(() => searchCache.delete(query));
+  remember(searchCache, query, { promise, expires: Date.now() + SEARCH_TTL_MS }, MAX_CACHED_SEARCHES);
   return promise;
 }
 
-function candidatesFor(family, items) {
-  const base = normalize(family);
+function facesFor(family, items) {
   const byFile = new Map();
   for (const item of items) {
-    const fileName = item.fileName ?? item.name ?? '';
-    const name = normalize(fileName);
-    const style = name.startsWith(base) ? STYLES.get(name.slice(base.length)) : undefined;
-    if (!style || !/\.(ttf|otf|ttc)$/i.test(fileName) || !(Number(item.sizeBytes) <= MAX_FONT_BYTES)) continue;
+    const face = item.faces?.[0];
+    const fullName = face?.fullName?.toLowerCase() ?? '';
+    const names = (face?.families ?? item.families ?? []).map((name) => name.toLowerCase());
+    if (!face || !(names.includes(family) || fullName === family)) continue;
+    if (!/\.(ttf|otf|ttc)$/i.test(item.fileName ?? '') || !(Number(item.sizeBytes) <= MAX_FONT_BYTES)) continue;
     const key = item.sha256 ?? item.id;
-    const entry = byFile.get(key) ?? { item, style, uploads: 0 };
+    const exact = fullName === family || face.family?.toLowerCase() === family;
+    const entry = byFile.get(key) ?? {
+      item,
+      weight: Number(face.weight) || 400,
+      italic: face.italic === true,
+      canonical: exact ? 0 : fullName.startsWith(family) ? 1 : 2,
+      uploads: 0,
+    };
     entry.uploads += 1;
     byFile.set(key, entry);
   }
   return [...byFile.values()];
 }
 
-function mostUploaded(candidates) {
-  return candidates.sort((a, b) => b.uploads - a.uploads || Number(a.item.sizeBytes) - Number(b.item.sizeBytes))[0];
+function variantScore(face, variant) {
+  const [bold, italic] = variant.split('|').map((value) => value === '1');
+  const slant = face.italic === italic ? 0 : face.italic ? 2000 : 1000;
+  return Math.abs(face.weight - (bold ? 700 : 400)) + slant + (face.canonical === 2 ? 5000 : 0);
 }
 
-function pickFiles(candidates, variants) {
-  const picked = new Set();
+function bestFace(faces, variant) {
+  return faces.reduce((best, face) => {
+    if (!best) return face;
+    const difference = variantScore(face, variant) - variantScore(best, variant) || face.canonical - best.canonical;
+    if (difference !== 0) return difference < 0 ? face : best;
+    return face.uploads > best.uploads || (face.uploads === best.uploads && Number(face.item.sizeBytes) < Number(best.item.sizeBytes)) ? face : best;
+  }, null);
+}
+
+async function familyFaces(api, family, variants) {
+  const first = await search(api, { family });
+  let faces = facesFor(family, first.items);
+  if (first.total <= first.items.length) return faces;
   for (const variant of variants) {
-    const best = mostUploaded(candidates.filter((entry) => entry.style === variant))
-      ?? mostUploaded(candidates.filter((entry) => entry.style === REGULAR));
-    if (!best) return [];
-    picked.add(best);
+    const best = bestFace(faces, variant);
+    if (best && variantScore(best, variant) < CLOSE_MATCH) continue;
+    const [bold, italic] = variant.split('|').map((value) => value === '1');
+    const page = await search(api, { family, weight: bold ? '700' : '400', italic: String(italic) });
+    faces = faces.concat(facesFor(family, page.items));
   }
-  return [...picked];
+  return faces;
 }
 
 async function download(api, entry) {
@@ -79,17 +90,32 @@ async function download(api, entry) {
   return { fileName: entry.item.fileName, bytes: await promise };
 }
 
-async function lookupFamily(api, family, variants, budget) {
-  const first = await search(api, family);
-  let items = first.items;
-  if (first.total > items.length && !candidatesFor(family, items).some((entry) => entry.style === REGULAR)) {
-    items = items.concat((await search(api, `${family}.`)).items);
+function hasFamily(font, family) {
+  try {
+    return readFontInfo(font.bytes).names.has(family);
+  } catch {
+    return false;
   }
-  const files = pickFiles(candidatesFor(family, items), variants);
-  if (files.length === 0 || files.length > budget.downloads) return [];
-  budget.downloads -= files.length;
-  const fonts = await Promise.all(files.map((entry) => download(api, entry)));
-  return fonts.every((font) => readFontInfo(font.bytes).names.has(family)) ? fonts : [];
+}
+
+async function lookupFamily(api, family, variants, budget) {
+  const faces = await familyFaces(api, family, variants);
+  const accepted = new Map();
+  const rejected = new Set();
+  for (const variant of variants) {
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const best = bestFace(faces.filter((face) => !rejected.has(face)), variant);
+      if (!best || accepted.has(best) || budget.downloads === 0) break;
+      budget.downloads -= 1;
+      const font = await download(api, best);
+      if (hasFamily(font, family)) {
+        accepted.set(best, font);
+        break;
+      }
+      rejected.add(best);
+    }
+  }
+  return [...accepted.values()];
 }
 
 export async function findLibraryFonts(api, families) {

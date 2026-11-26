@@ -45,7 +45,7 @@ function fontPath(file) {
 
 function fontLibrary(apiKey) {
   return {
-    search: async (query) => (await (await apiFetch(`/fonts?q=${encodeURIComponent(query)}`, apiKey)).json())?.data,
+    search: async (query) => (await (await apiFetch(`/fonts?${query}`, apiKey)).json())?.data,
     download: async (item) => (await apiFetch(apiPath(item.downloadUrl) ?? `/fonts/${encodeURIComponent(item.id)}/download`, apiKey)).arrayBuffer(),
   };
 }
